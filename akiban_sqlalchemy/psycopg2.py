@@ -28,6 +28,7 @@ class AkibanPsycopg2Dialect(AkibanDialect):
     def on_connect(self):
         fns = []
 
+        # TODO: not sure what the unicode situation is yet
         if self.dbapi and self.use_native_unicode:
             from psycopg2 import extensions
             def setup_unicode_extension(conn):

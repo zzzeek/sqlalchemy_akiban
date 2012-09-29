@@ -3,7 +3,7 @@ import re
 
 from sqlalchemy import sql, schema, exc, util
 from sqlalchemy.engine import default, reflection
-from sqlalchemy.sql import compiler, expression, util as sql_util
+from sqlalchemy.sql import compiler, expression
 from sqlalchemy import types as sqltypes
 
 from sqlalchemy.types import INTEGER, BIGINT, SMALLINT, VARCHAR, \
@@ -34,28 +34,9 @@ _FLOAT_TYPES = (700, 701, 1021, 1022)
 _INT_TYPES = (20, 21, 23, 26, 1005, 1007, 1016)
 
 
-class INTERVAL(sqltypes.TypeEngine):
-    """Postgresql INTERVAL type.
-
-    The INTERVAL type may not be supported on all DBAPIs.
-    It is known to work on psycopg2 and not pg8000 or zxjdbc.
-
-    """
-    __visit_name__ = 'INTERVAL'
-    def __init__(self, precision=None):
-        self.precision = precision
-
-    @classmethod
-    def _adapt_from_generic_interval(cls, interval):
-        return INTERVAL(precision=interval.second_precision)
-
-    @property
-    def _type_affinity(self):
-        return sqltypes.Interval
 
 
 colspecs = {
-    sqltypes.Interval: INTERVAL,
 }
 
 ischema_names = {
@@ -78,9 +59,6 @@ ischema_names = {
     'date': DATE,
     'time': TIME,
     'boolean': BOOLEAN,
-    'interval': INTERVAL,
-    'interval year to month': INTERVAL,
-    'interval day to second': INTERVAL,
 }
 
 class AkibanCompiler(compiler.SQLCompiler):
@@ -126,6 +104,7 @@ class AkibanDDLCompiler(compiler.DDLCompiler):
                     column.default.optional
                 )
             ):
+            # TODO: use akiban's main syntax here
             if isinstance(impl_type, sqltypes.BigInteger):
                 colspec += " BIGSERIAL"
             else:
@@ -150,15 +129,8 @@ class AkibanIdentifierPreparer(compiler.IdentifierPreparer):
     reserved_words = RESERVED_WORDS
 
 class AkibanInspector(reflection.Inspector):
+    pass
 
-    def __init__(self, conn):
-        reflection.Inspector.__init__(self, conn)
-
-    def get_table_oid(self, table_name, schema=None):
-        """Return the oid from `table_name` and `schema`."""
-
-        return self.dialect.get_table_oid(self.bind, table_name, schema,
-                                          info_cache=self.info_cache)
 
 
 class AkibanExecutionContext(default.DefaultExecutionContext):
@@ -273,37 +245,21 @@ class AkibanDialect(default.DefaultDialect):
     # TODO: need to inspect "standard_conforming_strings"
     _backslash_escapes = True
 
-    def __init__(self, isolation_level=None, **kwargs):
+    def __init__(self, **kwargs):
         default.DefaultDialect.__init__(self, **kwargs)
-        self.isolation_level = isolation_level
 
     def initialize(self, connection):
         super(AkibanDialect, self).initialize(connection)
         self.implicit_returning = False
 
     def on_connect(self):
-        if self.isolation_level is not None:
-            def connect(conn):
-                self.set_isolation_level(conn, self.isolation_level)
-            return connect
-        else:
-            return None
+        return None
 
     def _get_default_schema_name(self, connection):
         return connection.scalar("select CURRENT_USER")
 
     def has_schema(self, connection, schema):
-        cursor = connection.execute(
-            sql.text(
-                "select nspname from pg_namespace where lower(nspname)=:schema",
-                bindparams=[
-                    sql.bindparam(
-                        'schema', unicode(schema.lower()),
-                        type_=sqltypes.Unicode)]
-            )
-        )
-
-        return bool(cursor.first())
+        raise NotImplementedError("has_schema")
 
     def has_table(self, connection, table_name, schema=None):
         # seems like case gets folded in pg_class...
