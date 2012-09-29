@@ -1,0 +1,453 @@
+
+import re
+
+from sqlalchemy import sql, schema, exc, util
+from sqlalchemy.engine import default, reflection
+from sqlalchemy.sql import compiler, expression, util as sql_util
+from sqlalchemy import types as sqltypes
+
+from sqlalchemy.types import INTEGER, BIGINT, SMALLINT, VARCHAR, \
+        CHAR, TEXT, FLOAT, NUMERIC, \
+        DATE, BOOLEAN, REAL, TIMESTAMP, \
+        TIME
+
+RESERVED_WORDS = set(
+    ["all", "analyse", "analyze", "and", "any", "array", "as", "asc",
+    "asymmetric", "both", "case", "cast", "check", "collate", "column",
+    "constraint", "create", "current_catalog", "current_date",
+    "current_role", "current_time", "current_timestamp", "current_user",
+    "default", "deferrable", "desc", "distinct", "do", "else", "end",
+    "except", "false", "fetch", "for", "foreign", "from", "grant", "group",
+    "having", "in", "initially", "intersect", "into", "leading", "limit",
+    "localtime", "localtimestamp", "new", "not", "null", "off", "offset",
+    "old", "on", "only", "or", "order", "placing", "primary", "references",
+    "returning", "select", "session_user", "some", "symmetric", "table",
+    "then", "to", "trailing", "true", "union", "unique", "user", "using",
+    "variadic", "when", "where", "window", "with", "authorization",
+    "between", "binary", "cross", "current_schema", "freeze", "full",
+    "ilike", "inner", "is", "isnull", "join", "left", "like", "natural",
+    "notnull", "outer", "over", "overlaps", "right", "similar", "verbose"
+    ])
+
+_DECIMAL_TYPES = (1231, 1700)
+_FLOAT_TYPES = (700, 701, 1021, 1022)
+_INT_TYPES = (20, 21, 23, 26, 1005, 1007, 1016)
+
+
+class INTERVAL(sqltypes.TypeEngine):
+    """Postgresql INTERVAL type.
+
+    The INTERVAL type may not be supported on all DBAPIs.
+    It is known to work on psycopg2 and not pg8000 or zxjdbc.
+
+    """
+    __visit_name__ = 'INTERVAL'
+    def __init__(self, precision=None):
+        self.precision = precision
+
+    @classmethod
+    def _adapt_from_generic_interval(cls, interval):
+        return INTERVAL(precision=interval.second_precision)
+
+    @property
+    def _type_affinity(self):
+        return sqltypes.Interval
+
+
+colspecs = {
+    sqltypes.Interval: INTERVAL,
+}
+
+ischema_names = {
+    'integer': INTEGER,
+    'bigint': BIGINT,
+    'smallint': SMALLINT,
+    'character varying': VARCHAR,
+    'character': CHAR,
+    '"char"': sqltypes.String,
+    'name': sqltypes.String,
+    'text': TEXT,
+    'numeric': NUMERIC,
+    'float': FLOAT,
+    'real': REAL,
+    'timestamp': TIMESTAMP,
+    'timestamp with time zone': TIMESTAMP,
+    'timestamp without time zone': TIMESTAMP,
+    'time with time zone': TIME,
+    'time without time zone': TIME,
+    'date': DATE,
+    'time': TIME,
+    'boolean': BOOLEAN,
+    'interval': INTERVAL,
+    'interval year to month': INTERVAL,
+    'interval day to second': INTERVAL,
+}
+
+class AkibanCompiler(compiler.SQLCompiler):
+
+    def render_literal_value(self, value, type_):
+        value = super(AkibanCompiler, self).render_literal_value(value, type_)
+        # TODO: need to inspect "standard_conforming_strings"
+        if self.dialect._backslash_escapes:
+            value = value.replace('\\', '\\\\')
+        return value
+
+    def limit_clause(self, select):
+        text = ""
+        if select._limit is not None:
+            text += " \n LIMIT " + self.process(sql.literal(select._limit))
+        if select._offset is not None:
+            text += " OFFSET " + self.process(sql.literal(select._offset))
+            if select._limit is None:
+                text += " ROWS"  # OFFSET n ROW[S]
+        return text
+
+    def returning_clause(self, stmt, returning_cols):
+
+        columns = [
+                self._label_select_column(None, c, True, False, {})
+                for c in expression._select_iterables(returning_cols)
+            ]
+
+        return 'RETURNING ' + ', '.join(columns)
+
+
+class AkibanDDLCompiler(compiler.DDLCompiler):
+    def get_column_specification(self, column, **kwargs):
+        colspec = self.preparer.format_column(column)
+        impl_type = column.type.dialect_impl(self.dialect)
+        if column.primary_key and \
+            column is column.table._autoincrement_column and \
+            not isinstance(impl_type, sqltypes.SmallInteger) and \
+            (
+                column.default is None or
+                (
+                    isinstance(column.default, schema.Sequence) and
+                    column.default.optional
+                )
+            ):
+            if isinstance(impl_type, sqltypes.BigInteger):
+                colspec += " BIGSERIAL"
+            else:
+                colspec += " SERIAL"
+        else:
+            colspec += " " + self.dialect.type_compiler.process(column.type)
+            default = self.get_column_default_string(column)
+            if default is not None:
+                colspec += " DEFAULT " + default
+
+        if not column.nullable:
+            colspec += " NOT NULL"
+        return colspec
+
+
+
+class AkibanTypeCompiler(compiler.GenericTypeCompiler):
+    pass
+
+class AkibanIdentifierPreparer(compiler.IdentifierPreparer):
+
+    reserved_words = RESERVED_WORDS
+
+class AkibanInspector(reflection.Inspector):
+
+    def __init__(self, conn):
+        reflection.Inspector.__init__(self, conn)
+
+    def get_table_oid(self, table_name, schema=None):
+        """Return the oid from `table_name` and `schema`."""
+
+        return self.dialect.get_table_oid(self.bind, table_name, schema,
+                                          info_cache=self.info_cache)
+
+
+class AkibanExecutionContext(default.DefaultExecutionContext):
+    def fire_sequence(self, seq, type_):
+        return self._execute_scalar(
+                "select nextval('%s', '%s')" % (
+                    seq.schema or self.dialect.default_schema_name,
+                    self.dialect.identifier_preparer.format_sequence(seq)),
+                type_)
+
+    def set_ddl_autocommit(self, connection, value):
+        """Must be implemented by subclasses to accommodate DDL executions.
+
+        "connection" is the raw unwrapped DBAPI connection.   "value"
+        is True or False.  when True, the connection should be configured
+        such that a DDL can take place subsequently.  when False,
+        a DDL has taken place and the connection should be resumed
+        into non-autocommit mode.
+
+        """
+        raise NotImplementedError()
+
+    def _table_identity_sequence(self, table):
+        if '_akiban_identity_sequence' not in table.info:
+            schema = table.schema or self.dialect.default_schema_name
+            conn = self.root_connection
+            conn._cursor_execute(
+                self.cursor,
+                "select sequence_name from "
+                "information_schema.columns "
+                "where schema_name=%(schema)s and "
+                "table_name=%(tname)s",
+                {
+                    "tname": table.name,
+                    "schema": schema
+                }
+            )
+            table.info['_akiban_identity_sequence'] = \
+                (schema, self.cursor.fetchone()[0])
+        return table.info['_akiban_identity_sequence']
+
+    def pre_exec(self):
+        if self.isddl:
+            # TODO: to enhance this, we can detect "ddl in tran" on the
+            # database settings.  this error message should be improved to
+            # include a note about that.
+            if not self.should_autocommit:
+                raise exc.InvalidRequestError(
+                        "The Akiban dialect only supports "
+                        "DDL in 'autocommit' mode at this time.")
+
+            self.root_connection.engine.logger.info(
+                        "AUTOCOMMIT (Assuming no Akiban 'ddl in tran')")
+
+            self.set_ddl_autocommit(
+                        self.root_connection.connection.connection,
+                        True)
+
+    def post_exec(self):
+        if self.isddl:
+            self.set_ddl_autocommit(
+                        self.root_connection.connection.connection,
+                        False)
+
+    def get_lastrowid(self):
+        assert self.isinsert, "lastrowid only supported with "\
+                    "compiled insert() construct."
+        tbl = self.compiled.statement.table
+
+        seq_column = tbl._autoincrement_column
+        insert_has_sequence = seq_column is not None
+        if insert_has_sequence:
+            schema, sequence_name = self._table_identity_sequence(tbl)
+            conn = self.root_connection
+            conn._cursor_execute(self.cursor,
+                    "SELECT currval(%s, %s) AS lastrowid",
+                        (schema, sequence_name),
+                    self)
+            return self.cursor.fetchone()[0]
+        else:
+            return None
+
+
+class AkibanDialect(default.DefaultDialect):
+    name = 'akiban'
+    supports_alter = False
+    max_identifier_length = 63
+    supports_sane_rowcount = True
+
+    supports_native_enum = False
+    supports_native_boolean = False
+
+    supports_sequences = True
+    sequences_optional = True
+    preexecute_autoincrement_sequences = False
+    postfetch_lastrowid = True
+
+    supports_default_values = True
+    supports_empty_insert = False
+    default_paramstyle = 'pyformat'
+    ischema_names = ischema_names
+    colspecs = colspecs
+
+    statement_compiler = AkibanCompiler
+    ddl_compiler = AkibanDDLCompiler
+    type_compiler = AkibanTypeCompiler
+    preparer = AkibanIdentifierPreparer
+    execution_ctx_cls = AkibanExecutionContext
+    inspector = AkibanInspector
+    isolation_level = None
+
+    # TODO: need to inspect "standard_conforming_strings"
+    _backslash_escapes = True
+
+    def __init__(self, isolation_level=None, **kwargs):
+        default.DefaultDialect.__init__(self, **kwargs)
+        self.isolation_level = isolation_level
+
+    def initialize(self, connection):
+        super(AkibanDialect, self).initialize(connection)
+        self.implicit_returning = False
+
+    def on_connect(self):
+        if self.isolation_level is not None:
+            def connect(conn):
+                self.set_isolation_level(conn, self.isolation_level)
+            return connect
+        else:
+            return None
+
+    def _get_default_schema_name(self, connection):
+        return connection.scalar("select CURRENT_USER")
+
+    def has_schema(self, connection, schema):
+        cursor = connection.execute(
+            sql.text(
+                "select nspname from pg_namespace where lower(nspname)=:schema",
+                bindparams=[
+                    sql.bindparam(
+                        'schema', unicode(schema.lower()),
+                        type_=sqltypes.Unicode)]
+            )
+        )
+
+        return bool(cursor.first())
+
+    def has_table(self, connection, table_name, schema=None):
+        # seems like case gets folded in pg_class...
+        if schema is not None:
+            raise NotImplementedError("remote schemas")
+        else:
+            schema = self.default_schema_name
+
+        cursor = connection.execute(
+            sql.text(
+            "select table_name from information_schema.tables "
+            "where table_schema=:schema and table_name=:tname"
+            ),
+            {"tname": table_name, "schema": schema}
+        )
+        return bool(cursor.first())
+
+    def has_sequence(self, connection, sequence_name, schema=None):
+        raise NotImplementedError("has sequence")
+
+    def _get_server_version_info(self, connection):
+        ver = connection.scalar("select server_version from "
+                    "information_schema.server_instance_summary")
+        return ver
+
+    @reflection.cache
+    def get_schema_names(self, connection, **kw):
+        raise NotImplementedError("schema names")
+
+    @reflection.cache
+    def get_table_names(self, connection, schema=None, **kw):
+        raise NotImplementedError("table names")
+
+
+    @reflection.cache
+    def get_view_names(self, connection, schema=None, **kw):
+        raise NotImplementedError("view names")
+
+    @reflection.cache
+    def get_view_definition(self, connection, view_name, schema=None, **kw):
+        raise NotImplementedError("view definition")
+
+    @reflection.cache
+    def get_columns(self, connection, table_name, schema=None, **kw):
+        raise NotImplementedError()
+
+    def _get_column_info(self, name, format_type, default,
+                         notnull, schema):
+        ## strip (*) from character varying(5), timestamp(5)
+        # with time zone, geometry(POLYGON), etc.
+        attype = re.sub(r'\(.*\)', '', format_type)
+
+        # strip '[]' from integer[], etc.
+        attype = re.sub(r'\[\]', '', attype)
+
+        nullable = not notnull
+        charlen = re.search('\(([\d,]+)\)', format_type)
+        if charlen:
+            charlen = charlen.group(1)
+        args = re.search('\((.*)\)', format_type)
+        if args and args.group(1):
+            args = tuple(re.split('\s*,\s*', args.group(1)))
+        else:
+            args = ()
+        kwargs = {}
+
+        if attype == 'numeric':
+            if charlen:
+                prec, scale = charlen.split(',')
+                args = (int(prec), int(scale))
+            else:
+                args = ()
+        elif attype == 'double precision':
+            args = (53, )
+        elif attype == 'integer':
+            args = ()
+        elif attype in ('timestamp with time zone',
+                        'time with time zone'):
+            kwargs['timezone'] = True
+            if charlen:
+                kwargs['precision'] = int(charlen)
+            args = ()
+        elif attype in ('timestamp without time zone',
+                        'time without time zone', 'time'):
+            kwargs['timezone'] = False
+            if charlen:
+                kwargs['precision'] = int(charlen)
+            args = ()
+        elif attype == 'bit varying':
+            kwargs['varying'] = True
+            if charlen:
+                args = (int(charlen),)
+            else:
+                args = ()
+        elif attype in ('interval', 'interval year to month',
+                            'interval day to second'):
+            if charlen:
+                kwargs['precision'] = int(charlen)
+            args = ()
+        elif charlen:
+            args = (int(charlen),)
+
+        while True:
+            if attype in self.ischema_names:
+                coltype = self.ischema_names[attype]
+                break
+            else:
+                coltype = None
+                break
+
+        if coltype:
+            coltype = coltype(*args, **kwargs)
+        else:
+            util.warn("Did not recognize type '%s' of column '%s'" %
+                      (attype, name))
+            coltype = sqltypes.NULLTYPE
+        # adjust the default value
+        autoincrement = False
+        if default is not None:
+            match = re.search(r"""(nextval\(')([^']+)('.*$)""", default)
+            if match is not None:
+                autoincrement = True
+                # the default is related to a Sequence
+                sch = schema
+                if '.' not in match.group(2) and sch is not None:
+                    # unconditionally quote the schema name.  this could
+                    # later be enhanced to obey quoting rules /
+                    # "quote schema"
+                    default = match.group(1) + \
+                                ('"%s"' % sch) + '.' + \
+                                match.group(2) + match.group(3)
+
+        column_info = dict(name=name, type=coltype, nullable=nullable,
+                           default=default, autoincrement=autoincrement)
+        return column_info
+
+    @reflection.cache
+    def get_pk_constraint(self, connection, table_name, schema=None, **kw):
+        raise NotImplementedError()
+
+    @reflection.cache
+    def get_foreign_keys(self, connection, table_name, schema=None, **kw):
+        raise NotImplementedError()
+
+    @reflection.cache
+    def get_indexes(self, connection, table_name, schema, **kw):
+        raise NotImplementedError()

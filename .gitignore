@@ -1,0 +1,9 @@
+*.pyc
+*.swp
+*.orig
+build
+tmp
+dist
+.venv
+akiban.egg-info/
+.coverage
