@@ -153,12 +153,12 @@ class AkibanExecutionContext(default.DefaultExecutionContext):
         """
         raise NotImplementedError()
 
-    def _table_identity_sequence(self, table):
+    def _table_identity_sequence(self, table, cursor):
         if '_akiban_identity_sequence' not in table.info:
             schema = table.schema or self.dialect.default_schema_name
             conn = self.root_connection
             conn._cursor_execute(
-                self.cursor,
+                cursor,
                 "select sequence_name from "
                 "information_schema.columns "
                 "where schema_name=%(schema)s and "
@@ -169,7 +169,7 @@ class AkibanExecutionContext(default.DefaultExecutionContext):
                 }
             )
             table.info['_akiban_identity_sequence'] = \
-                (schema, self.cursor.fetchone()[0])
+                (schema, cursor.fetchone()[0])
         return table.info['_akiban_identity_sequence']
 
     def pre_exec(self):
@@ -203,13 +203,16 @@ class AkibanExecutionContext(default.DefaultExecutionContext):
         seq_column = tbl._autoincrement_column
         insert_has_sequence = seq_column is not None
         if insert_has_sequence:
-            schema, sequence_name = self._table_identity_sequence(tbl)
-            conn = self.root_connection
-            conn._cursor_execute(self.cursor,
+            conn = self.root_connection.connection
+            cursor = conn.cursor()
+            schema, sequence_name = self._table_identity_sequence(tbl, cursor)
+            self.root_connection._cursor_execute(cursor,
                     "SELECT currval(%s, %s) AS lastrowid",
                         (schema, sequence_name),
                     self)
-            return self.cursor.fetchone()[0]
+            lri = cursor.fetchone()[0]
+            cursor.close()
+            return lri
         else:
             return None
 

@@ -3,16 +3,16 @@ import re
 
 from setuptools import setup
 
-v = open(os.path.join(os.path.dirname(__file__), 'akiban_sqlalchemy', '__init__.py'))
+v = open(os.path.join(os.path.dirname(__file__), 'sqlalchemy_akiban', '__init__.py'))
 VERSION = re.compile(r".*__version__ = '(.*?)'", re.S).match(v.read()).group(1)
 v.close()
 
 readme = os.path.join(os.path.dirname(__file__), 'README.rst')
 
 
-setup(name='akiban_sqlalchemy',
+setup(name='sqlalchemy_akiban',
       version=VERSION,
-      description="Akiban for SQLAlchemy",
+      description="Akiban Dialect and ORM Extension for SQLAlchemy",
       long_description=open(readme).read(),
       classifiers=[
       'Development Status :: 3 - Alpha',
@@ -28,15 +28,15 @@ setup(name='akiban_sqlalchemy',
       author='Mike Bayer',
       author_email='mike@zzzcomputing.com',
       license='MIT',
-      packages=['akiban_sqlalchemy'],
+      packages=['sqlalchemy_akiban'],
       include_package_data=True,
       tests_require=['nose >= 0.11'],
       test_suite="nose.collector",
       zip_safe=False,
       entry_points={
          'sqlalchemy.dialects': [
-              'akiban = akiban_sqlalchemy.psycopg2:AkibanPsycopg2Dialect',
-              'akiban.psycopg2 = akiban_sqlalchemy.psycopg2:AkibanPsycopg2Dialect',
+              'akiban = sqlalchemy_akiban.psycopg2:AkibanPsycopg2Dialect',
+              'akiban.psycopg2 = sqlalchemy_akiban.psycopg2:AkibanPsycopg2Dialect',
               ]
         }
 )
