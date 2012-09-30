@@ -1,11 +1,7 @@
 import os
 import re
 
-
-try:
-    from setuptools import setup
-except ImportError:
-    from distutils.core import setup
+from setuptools import setup
 
 v = open(os.path.join(os.path.dirname(__file__), 'akiban_sqlalchemy', '__init__.py'))
 VERSION = re.compile(r".*__version__ = '(.*?)'", re.S).match(v.read()).group(1)
