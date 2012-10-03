@@ -5,6 +5,10 @@ from sqlalchemy.testing import exclusions
 class Requirements(SuiteRequirements):
     @property
     def foreign_key_ddl(self):
+        return exclusions.open()
+
+    @property
+    def self_referential_foreign_keys(self):
         return exclusions.closed()
 
     @property
@@ -29,4 +33,9 @@ class Requirements(SuiteRequirements):
 
     @property
     def index_reflection(self):
+        return exclusions.closed()
+
+    @property
+    def returning(self):
+        # not seeing RETURNING working yet
         return exclusions.closed()
