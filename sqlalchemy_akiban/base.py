@@ -119,6 +119,26 @@ class AkibanDDLCompiler(compiler.DDLCompiler):
             colspec += " NOT NULL"
         return colspec
 
+    def visit_foreign_key_constraint(self, constraint):
+        preparer = self.dialect.identifier_preparer
+        text = ""
+        if constraint.name is not None:
+            text += "CONSTRAINT %s " % \
+                        preparer.format_constraint(constraint)
+        remote_table = list(constraint._elements.values())[0].column.table
+        text += "FOREIGN KEY(%s) REFERENCES %s (%s)" % (
+            ', '.join(preparer.quote(f.parent.name, f.parent.quote)
+                      for f in constraint._elements.values()),
+            self.define_constraint_remote_table(
+                            constraint, remote_table, preparer),
+            ', '.join(preparer.quote(f.column.name, f.column.quote)
+                      for f in constraint._elements.values())
+        )
+        text += self.define_constraint_match(constraint)
+        text += self.define_constraint_cascades(constraint)
+        text += self.define_constraint_deferrability(constraint)
+        return text
+
 
 
 class AkibanTypeCompiler(compiler.GenericTypeCompiler):
@@ -222,7 +242,7 @@ class AkibanDialect(default.DefaultDialect):
     supports_native_enum = False
     supports_native_boolean = False
 
-    supports_sequences = True
+    supports_sequences = False  # TODO: True
     sequences_optional = True
     preexecute_autoincrement_sequences = False
     postfetch_lastrowid = True

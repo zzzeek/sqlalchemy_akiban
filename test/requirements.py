@@ -1,4 +1,32 @@
 from sqlalchemy.testing.requirements import SuiteRequirements
 
+from sqlalchemy.testing import exclusions
+
 class Requirements(SuiteRequirements):
-    pass
+    @property
+    def foreign_key_ddl(self):
+        return exclusions.closed()
+
+    @property
+    def table_reflection(self):
+        return exclusions.closed()
+
+    @property
+    def view_reflection(self):
+        return exclusions.closed()
+
+    @property
+    def schema_reflection(self):
+        return exclusions.closed()
+
+    @property
+    def primary_key_constraint_reflection(self):
+        return exclusions.closed()
+
+    @property
+    def foreign_key_constraint_reflection(self):
+        return exclusions.closed()
+
+    @property
+    def index_reflection(self):
+        return exclusions.closed()
