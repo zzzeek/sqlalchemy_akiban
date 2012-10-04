@@ -9,6 +9,9 @@ from .base import AkibanDialect, AkibanExecutionContext
 Connection = None
 
 class AkibanPsycopg2ExecutionContext(AkibanExecutionContext):
+    def create_cursor(self):
+        return self._dbapi_connection.cursor(nested=not self.is_crud)
+
     def set_ddl_autocommit(self, connection, value):
         # this is psycopg2.autocommit:
         # http://initd.org/psycopg/docs/connection.html#connection.autocommit

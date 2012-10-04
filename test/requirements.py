@@ -37,5 +37,4 @@ class Requirements(SuiteRequirements):
 
     @property
     def returning(self):
-        # not seeing RETURNING working yet
-        return exclusions.closed()
+        return exclusions.open()

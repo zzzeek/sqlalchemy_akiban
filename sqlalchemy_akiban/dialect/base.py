@@ -218,10 +218,10 @@ class AkibanExecutionContext(default.DefaultExecutionContext):
         seq_column = tbl._autoincrement_column
         insert_has_sequence = seq_column is not None
         if insert_has_sequence:
-            schema, sequence_name = self._table_identity_sequence(tbl)
+            schema_, sequence_name = self._table_identity_sequence(tbl)
             self.root_connection._cursor_execute(self.cursor,
                     "SELECT currval(%s, %s) AS lastrowid",
-                        (schema, sequence_name),
+                        (schema_, sequence_name),
                     self)
             return self.cursor.fetchone()[0]
         else:
