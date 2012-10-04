@@ -264,7 +264,6 @@ class AkibanDialect(default.DefaultDialect):
 
     def initialize(self, connection):
         super(AkibanDialect, self).initialize(connection)
-        self.implicit_returning = False
 
     def on_connect(self):
         return None
