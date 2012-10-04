@@ -35,8 +35,8 @@ setup(name='sqlalchemy_akiban',
       zip_safe=False,
       entry_points={
          'sqlalchemy.dialects': [
-              'akiban = sqlalchemy_akiban.psycopg2:AkibanPsycopg2Dialect',
-              'akiban.psycopg2 = sqlalchemy_akiban.psycopg2:AkibanPsycopg2Dialect',
+              'akiban = sqlalchemy_akiban.dialect.psycopg2:AkibanPsycopg2Dialect',
+              'akiban.psycopg2 = sqlalchemy_akiban.dialect.psycopg2:AkibanPsycopg2Dialect',
               ]
         }
 )
