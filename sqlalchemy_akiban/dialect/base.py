@@ -6,7 +6,7 @@ from sqlalchemy.engine import default, reflection, ResultProxy
 from sqlalchemy.sql import compiler, expression
 from sqlalchemy import types as sqltypes
 from akiban.api import NESTED_CURSOR
-import weakref
+from sqlalchemy.ext.compiler import compiles
 
 from sqlalchemy.types import INTEGER, BIGINT, SMALLINT, VARCHAR, \
         CHAR, TEXT, FLOAT, NUMERIC, \
@@ -50,6 +50,7 @@ class nested(expression.ColumnElement):
         self.stmt = stmt.as_scalar()
         self.type = NestedResult()
 
+
 colspecs = {
 }
 
@@ -75,21 +76,22 @@ ischema_names = {
     'boolean': BOOLEAN,
 }
 
+@compiles(nested)
+def _visit_akiban_nested(nested, compiler, **kw):
+    saved_result_map = compiler.result_map
+    if hasattr(compiler, '_akiban_nested'):
+        compiler.result_map = compiler._akiban_nested[nested.type] = {}
+    try:
+        kw['force_result_map'] = True
+        return compiler.process(nested.stmt, **kw)
+    finally:
+        compiler.result_map = saved_result_map
 
 class AkibanCompiler(compiler.SQLCompiler):
 
     @util.memoized_property
     def _akiban_nested(self):
         return {}
-
-    def visit_akiban_nested(self, nested, **kw):
-        saved_result_map = self.result_map
-        self.result_map = self._akiban_nested[nested.type] = {}
-        try:
-            kw['force_result_map'] = True
-            return self.process(nested.stmt, **kw)
-        finally:
-            self.result_map = saved_result_map
 
     def render_literal_value(self, value, type_):
         value = super(AkibanCompiler, self).render_literal_value(value, type_)
