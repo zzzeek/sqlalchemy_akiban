@@ -2,9 +2,11 @@
 import re
 
 from sqlalchemy import sql, schema, exc, util
-from sqlalchemy.engine import default, reflection
+from sqlalchemy.engine import default, reflection, ResultProxy
 from sqlalchemy.sql import compiler, expression
 from sqlalchemy import types as sqltypes
+from akiban.api import NESTED_CURSOR
+import weakref
 
 from sqlalchemy.types import INTEGER, BIGINT, SMALLINT, VARCHAR, \
         CHAR, TEXT, FLOAT, NUMERIC, \
@@ -34,7 +36,19 @@ _FLOAT_TYPES = (700, 701, 1021, 1022)
 _INT_TYPES = (20, 21, 23, 26, 1005, 1007, 1016)
 
 
+class NestedResult(sqltypes.TypeEngine):
 
+    def akiban_result_processor(self, gen_nested_context):
+        def process(value):
+            return ResultProxy(gen_nested_context(value))
+        return process
+
+class nested(expression.ColumnElement):
+    __visit_name__ = 'akiban_nested'
+
+    def __init__(self, stmt):
+        self.stmt = stmt.as_scalar()
+        self.type = NestedResult()
 
 colspecs = {
 }
@@ -61,7 +75,21 @@ ischema_names = {
     'boolean': BOOLEAN,
 }
 
+
 class AkibanCompiler(compiler.SQLCompiler):
+
+    @util.memoized_property
+    def _akiban_nested(self):
+        return {}
+
+    def visit_akiban_nested(self, nested, **kw):
+        saved_result_map = self.result_map
+        self.result_map = self._akiban_nested[nested.type] = {}
+        try:
+            kw['force_result_map'] = True
+            return self.process(nested.stmt, **kw)
+        finally:
+            self.result_map = saved_result_map
 
     def render_literal_value(self, value, type_):
         value = super(AkibanCompiler, self).render_literal_value(value, type_)
@@ -149,6 +177,23 @@ class AkibanInspector(reflection.Inspector):
 
 
 class AkibanExecutionContext(default.DefaultExecutionContext):
+    def get_result_processor(self, type_, colname, coltype):
+        if self.compiled and type_ in self.compiled._akiban_nested:
+            class NestedContext(object):
+                result_map = self.compiled._akiban_nested[type_]
+                dialect = self.dialect
+                root_connection = self.root_connection
+                engine = self.engine
+                _translate_colname = None
+                get_result_processor = self.get_result_processor
+
+                def __init__(self, value):
+                    self.cursor = value
+
+            return type_.akiban_result_processor(NestedContext)
+        else:
+            return type_._cached_result_processor(self.dialect, coltype)
+
     def fire_sequence(self, seq, type_):
         return self._execute_scalar(
                 "select nextval('%s', '%s')" % (
@@ -256,6 +301,9 @@ class AkibanDialect(default.DefaultDialect):
     inspector = AkibanInspector
     isolation_level = None
 
+    dbapi_type_map = {
+        NESTED_CURSOR: NestedResult()
+    }
     # TODO: need to inspect "standard_conforming_strings"
     _backslash_escapes = True
 

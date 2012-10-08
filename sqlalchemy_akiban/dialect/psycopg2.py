@@ -21,6 +21,9 @@ class AkibanPsycopg2ExecutionContext(AkibanExecutionContext):
 class AkibanPsycopg2Dialect(AkibanDialect):
     use_native_unicode = True
     execution_ctx_cls = AkibanPsycopg2ExecutionContext
+    driver = 'psycopg2'
+
+    supports_native_decimal = True
 
     @classmethod
     def dbapi(cls):

@@ -1,13 +1,11 @@
 from sqlalchemy.testing import fixtures
-from sqlalchemy.testing.assertions import eq_, is_, AssertsCompiledSQL
+from sqlalchemy.testing.assertions import eq_, is_, AssertsCompiledSQL, AssertsExecutionResults
 from sqlalchemy.orm import relationship, Session, mapper
-from .fixtures import cust_order_item
+from .fixtures import cust_order_item, cust_order_data
 
 from sqlalchemy_akiban import orm
 
-class RenderTest(fixtures.MappedTest, AssertsCompiledSQL):
-    __dialect__ = 'akiban'
-
+class _Fixture(object):
     @classmethod
     def define_tables(cls, metadata):
         cust_order_item(metadata)
@@ -37,6 +35,9 @@ class RenderTest(fixtures.MappedTest, AssertsCompiledSQL):
         })
         mapper(Item, item)
 
+class RenderTest(_Fixture, fixtures.MappedTest, AssertsCompiledSQL):
+    __dialect__ = 'akiban'
+
     def test_option_creation(self):
         from sqlalchemy.orm.strategies import EagerLazyOption
         Customer = self.classes.Customer
@@ -56,4 +57,32 @@ class RenderTest(fixtures.MappedTest, AssertsCompiledSQL):
                 'WHERE customer.id = "order".customer_id) AS anon_1 '
                 'FROM customer'
         )
+
+class LoadTest(_Fixture, fixtures.MappedTest, AssertsExecutionResults):
+    run_inserts = 'once'
+
+    @classmethod
+    def insert_data(cls):
+        cust_order_data(cls)
+
+    def test_load_collection(self):
+        Customer = self.classes.Customer
+        Order = self.classes.Order
+
+        s = Session()
+        q = s.query(Customer).options(orm.nestedload(Customer.orders)).filter(Customer.id == 1)
+
+        with self.assert_statement_count(1):
+            eq_(
+                q.all(),
+                [Customer(id=1, name='David McFarlane',
+                        orders=[Order(customer_id=1, id=101,
+                                    order_info='apple related'),
+                                Order(customer_id=1, id=102,
+                                    order_info='apple related'),
+                                Order(customer_id=1, id=103,
+                                    order_info='apple related')]
+                        )]
+            )
+
 
