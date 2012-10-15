@@ -43,14 +43,16 @@ class NestedResult(sqltypes.TypeEngine):
             return ResultProxy(gen_nested_context(value))
         return process
 
-class nested(expression.ColumnElement):
+class nested(expression.ScalarSelect):
     __visit_name__ = 'akiban_nested'
 
     def __init__(self, stmt):
-        self.stmt = expression._interpret_as_from(stmt)
-        if not isinstance(self.stmt, expression.Select):
-            self.stmt = self.stmt.select()
-        self.stmt = self.stmt.as_scalar()
+        if isinstance(stmt, expression.ScalarSelect):
+            stmt = stmt.element
+        elif not isinstance(stmt, expression.SelectBase):
+            stmt = expression.select(util.to_list(stmt))
+
+        super(nested, self).__init__(stmt)
         self.type = NestedResult()
 
 
@@ -87,7 +89,7 @@ def _visit_akiban_nested(nested, compiler, **kw):
         compiler.result_map = compiler._akiban_nested[nested.type] = {}
     try:
         kw['force_result_map'] = True
-        return compiler.process(nested.stmt, **kw)
+        return compiler.visit_grouping(nested, **kw)
     finally:
         compiler.result_map = saved_result_map
 

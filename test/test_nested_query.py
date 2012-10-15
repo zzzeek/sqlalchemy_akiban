@@ -85,7 +85,7 @@ class RenderTest(_Fixture, fixtures.MappedTest, AssertsCompiledSQL):
         Customer = self.classes.Customer
         Order = self.classes.Order
 
-        n = nested(select([Order]).where(Customer.orders))
+        n = nested(Order).where(Customer.orders)
         self.assert_compile(
             n,
             '(SELECT "order".id, "order".customer_id, "order".order_info '
@@ -96,7 +96,7 @@ class RenderTest(_Fixture, fixtures.MappedTest, AssertsCompiledSQL):
         Customer = self.classes.Customer
         Order = self.classes.Order
         s = Session()
-        n = nested(select([Order]).where(Customer.orders))
+        n = nested(Order).where(Customer.orders)
         q = s.query(Customer, n)
         self.assert_compile(
                 q,

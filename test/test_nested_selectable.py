@@ -15,6 +15,14 @@ class NestedSelectableTest(fixtures.TablesTest, AssertsCompiledSQL):
         cust_order_item(metadata)
         metadata.bind = None
 
+    def _assert_basic(self, stmt):
+        self.assert_compile(
+            stmt,
+            'SELECT (SELECT "order".id, "order".customer_id, '
+            '"order".order_info FROM "order" WHERE "order".customer_id = '
+            'customer.id) AS o FROM customer WHERE customer.id = %(id_1)s'
+        )
+
     def test_basic(self):
         customer = self.tables.customer
         order = self.tables.order
@@ -22,12 +30,34 @@ class NestedSelectableTest(fixtures.TablesTest, AssertsCompiledSQL):
         sub_stmt = nested(select([order]).where(order.c.customer_id
                                             == customer.c.id)).label('o')
         stmt = select([sub_stmt]).where(customer.c.id == 1)
-        self.assert_compile(
-            stmt,
-            'SELECT (SELECT "order".id, "order".customer_id, '
-            '"order".order_info FROM "order" WHERE "order".customer_id = '
-            'customer.id) AS o FROM customer WHERE customer.id = %(id_1)s'
-        )
+        self._assert_basic(stmt)
+
+    def test_implicit_select_aslist(self):
+        customer = self.tables.customer
+        order = self.tables.order
+
+        sub_stmt = nested([order]).where(order.c.customer_id
+                                            == customer.c.id).label('o')
+        stmt = select([sub_stmt]).where(customer.c.id == 1)
+        self._assert_basic(stmt)
+
+    def test_implicit_select_scalar_arg(self):
+        customer = self.tables.customer
+        order = self.tables.order
+
+        sub_stmt = nested(order).where(order.c.customer_id
+                                            == customer.c.id).label('o')
+        stmt = select([sub_stmt]).where(customer.c.id == 1)
+        self._assert_basic(stmt)
+
+    def test_unwrap_as_scalar(self):
+        customer = self.tables.customer
+        order = self.tables.order
+
+        sub_stmt = nested(select([order]).as_scalar()).where(order.c.customer_id
+                                            == customer.c.id).label('o')
+        stmt = select([sub_stmt]).where(customer.c.id == 1)
+        self._assert_basic(stmt)
 
     def test_double(self):
         customer = self.tables.customer
