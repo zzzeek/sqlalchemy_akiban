@@ -47,8 +47,12 @@ class nested(expression.ColumnElement):
     __visit_name__ = 'akiban_nested'
 
     def __init__(self, stmt):
-        self.stmt = stmt.as_scalar()
+        self.stmt = expression._interpret_as_from(stmt)
+        if not isinstance(self.stmt, expression.Select):
+            self.stmt = self.stmt.select()
+        self.stmt = self.stmt.as_scalar()
         self.type = NestedResult()
+
 
 
 colspecs = {
