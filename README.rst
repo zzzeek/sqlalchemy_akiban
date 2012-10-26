@@ -139,6 +139,7 @@ The ``orm.nestedload()`` and ``orm.nestedload_all()`` provide relationship eager
 making usage of an embedded nested result.  These are used just like SQLAlchemy's own
 ``orm.joinedload()`` and ``orm.subqueryload()`` functions::
 
+    from sqlalchemy.orm import relationship, Session
     from sqlalchemy.ext.declarative import declarative_base
     from sqlalchemy_akiban import orm
 
