@@ -1,12 +1,13 @@
 
 import re
 
-from sqlalchemy import sql, schema, exc, util
+from sqlalchemy import sql, exc, util
 from sqlalchemy.engine import default, reflection, ResultProxy
 from sqlalchemy.sql import compiler, expression
 from sqlalchemy import types as sqltypes
 from akiban.api import NESTED_CURSOR
 from sqlalchemy.ext.compiler import compiles
+import collections
 
 from sqlalchemy.types import INTEGER, BIGINT, SMALLINT, VARCHAR, \
         CHAR, TEXT, FLOAT, NUMERIC, \
@@ -360,7 +361,19 @@ class AkibanDialect(default.DefaultDialect):
 
     @reflection.cache
     def get_table_names(self, connection, schema=None, **kw):
-        raise NotImplementedError("table names")
+        if schema is not None:
+            raise NotImplementedError("remote schemas")
+        else:
+            schema = self.default_schema_name
+
+        cursor = connection.execute(
+            sql.text(
+            "select table_name from information_schema.tables "
+            "where table_schema=:schema"
+            ),
+            {"schema": schema}
+        )
+        return [row[0] for row in cursor.fetchall()]
 
 
     @reflection.cache
@@ -471,7 +484,36 @@ class AkibanDialect(default.DefaultDialect):
 
     @reflection.cache
     def get_foreign_keys(self, connection, table_name, schema=None, **kw):
-        raise NotImplementedError()
+        if schema is not None:
+            raise NotImplementedError("remote schemas")
+        else:
+            schema = self.default_schema_name
+
+        FK_SQL = """
+            SELECT tc.constraint_name, tc.constraint_type, kcu.column_name
+            FROM information_schema.table_constraints AS tc
+                JOIN information_schema.key_column_usage AS kcu
+                ON tc.schema_name=kcu.schema_name AND tc.table_name=kcu.table_name
+                WHERE tc.schema_name=:schema
+                AND tc.table_name=:table
+                ORDER BY kcu.ordinal_position
+        """
+
+        t = sql.text(FK_SQL)
+        c = connection.execute(t, table=table_name, schema=schema)
+        fkeys = collections.defaultdict(list)
+
+        # TODO: this is way too simplistic, can't get referents here.
+        # might need to regexp a CREATE TABLE statement or similar here.
+        for conname, contype, colname in c.fetchall():
+            fkeys[conname].append(colname)
+
+        return [
+            {
+                'name':name,
+                'constrained_columns':fkeys[name]
+            } for name in fkeys
+        ]
 
     @reflection.cache
     def get_indexes(self, connection, table_name, schema, **kw):
